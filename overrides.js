@@ -4605,11 +4605,95 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         }
     }
 
+    function initAboutProductsCarousel() {
+        const track = document.getElementById('aboutCarouselTrack');
+        const dotsContainer = document.getElementById('aboutCarouselDots');
+        const prevButton = document.getElementById('aboutCarouselPrev');
+        const nextButton = document.getElementById('aboutCarouselNext');
+        if (!track || !dotsContainer || !prevButton || !nextButton) return;
+        if (track.dataset.initializedCarousel === 'true') return;
+
+        const availableProducts = (Array.isArray(products) ? products : [])
+            .filter(product => product && (product.imageUrl || product.image))
+            .slice(0, 6);
+
+        if (!availableProducts.length) return;
+
+        track.innerHTML = availableProducts.map((product, index) => `
+            <div class="about-carousel-slide ${index === 0 ? 'is-active' : ''}" data-slide-index="${index}">
+                ${product.imageUrl
+                    ? `<img src="${product.imageUrl}" alt="${product.name}" class="about-carousel-image">`
+                    : `<div class="about-carousel-image" style="display:grid;place-items:center;color:#f6d774;font-size:6rem;"><i class="${product.image || 'fas fa-couch'}"></i></div>`}
+                <div class="about-carousel-caption">
+                    <strong>${product.name || 'Mobilier'}</strong>
+                    <span>${product.description || 'Mobiliário selecionado para compor eventos com estilo e praticidade.'}</span>
+                </div>
+            </div>
+        `).join('');
+
+        dotsContainer.innerHTML = availableProducts.map((_, index) => `
+            <button type="button" class="about-carousel-dot ${index === 0 ? 'is-active' : ''}" data-dot-index="${index}" aria-label="Ir para imagem ${index + 1}"></button>
+        `).join('');
+
+        track.dataset.initializedCarousel = 'true';
+        let currentIndex = 0;
+        let carouselTimer = null;
+
+        const slides = () => Array.from(track.querySelectorAll('.about-carousel-slide'));
+        const dots = () => Array.from(dotsContainer.querySelectorAll('.about-carousel-dot'));
+
+        const activateSlide = (nextIndex) => {
+            const allSlides = slides();
+            const allDots = dots();
+            if (!allSlides.length) return;
+            currentIndex = (nextIndex + allSlides.length) % allSlides.length;
+            allSlides.forEach((slide, index) => slide.classList.toggle('is-active', index === currentIndex));
+            allDots.forEach((dot, index) => dot.classList.toggle('is-active', index === currentIndex));
+        };
+
+        const startAutoPlay = () => {
+            stopAutoPlay();
+            carouselTimer = setInterval(() => {
+                activateSlide(currentIndex + 1);
+            }, 4200);
+        };
+
+        const stopAutoPlay = () => {
+            if (carouselTimer) {
+                clearInterval(carouselTimer);
+                carouselTimer = null;
+            }
+        };
+
+        prevButton.addEventListener('click', () => {
+            activateSlide(currentIndex - 1);
+            startAutoPlay();
+        });
+
+        nextButton.addEventListener('click', () => {
+            activateSlide(currentIndex + 1);
+            startAutoPlay();
+        });
+
+        dotsContainer.addEventListener('click', (event) => {
+            const dot = event.target.closest('.about-carousel-dot');
+            if (!dot) return;
+            activateSlide(parseInt(dot.dataset.dotIndex || '0', 10) || 0);
+            startAutoPlay();
+        });
+
+        track.closest('.about-carousel')?.addEventListener('mouseenter', stopAutoPlay);
+        track.closest('.about-carousel')?.addEventListener('mouseleave', startAutoPlay);
+        startAutoPlay();
+    }
+
     renderDeferredEventBriefCard();
     bindCustomerAccountQuickActions();
+    initAboutProductsCarousel();
     document.addEventListener('DOMContentLoaded', function () {
         renderDeferredEventBriefCard();
         bindCustomerAccountQuickActions();
+        initAboutProductsCarousel();
     });
 })();
 

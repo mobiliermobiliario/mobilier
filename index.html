@@ -539,10 +539,24 @@
                     </div>
                 </div>
                 
-                <div class="about-image">
-                    <div class="image-placeholder">
-                        <i class="fas fa-chair"></i>
-                        <p>Imagem representativa do nosso mobiliário</p>
+                <div class="about-image about-carousel-shell">
+                    <div class="about-carousel" id="aboutProductsCarousel">
+                        <div class="about-carousel-track" id="aboutCarouselTrack">
+                            <div class="about-carousel-slide is-active">
+                                <img src="logo.png" alt="Mobilier" class="about-carousel-image">
+                                <div class="about-carousel-caption">
+                                    <strong>Seleção de mobiliário para eventos</strong>
+                                    <span>As imagens dos produtos cadastrados aparecem aqui automaticamente.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="about-carousel-control prev" id="aboutCarouselPrev" aria-label="Imagem anterior">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <button type="button" class="about-carousel-control next" id="aboutCarouselNext" aria-label="Próxima imagem">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <div class="about-carousel-dots" id="aboutCarouselDots"></div>
                     </div>
                 </div>
             </div>
