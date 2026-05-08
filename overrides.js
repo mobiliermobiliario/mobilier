@@ -1205,7 +1205,7 @@
                             <i class="fas fa-check"></i>
                             <div>
                                 <strong>${isAdminMode ? 'Complete os dados operacionais deste pedido.' : 'Recebemos o seu orçamento.'}</strong>
-                                <span>${isAdminMode ? 'Preencha endereço, CEP e frete para manter o pedido, financeiro e atendimento alinhados.' : 'Agora você pode preencher os dados de entrega e o valor do frete, ou deixar para combinarmos isso com você depois.'}</span>
+                                <span>${isAdminMode ? 'Preencha endereço, CEP e frete para manter o pedido, financeiro e atendimento alinhados.' : 'Agora você pode preencher os dados de entrega, ou deixar para combinarmos isso com você depois.'}</span>
                             </div>
                         </div>
                         <div class="post-freight-summary">
@@ -1222,15 +1222,15 @@
                                 <strong>${formatCurrencyBRL(budget.subtotal || budget.total || 0)}</strong>
                             </div>
                         </div>
-                        <div class="post-freight-form-grid compact">
+                        <div class="post-freight-form-grid ${isAdminMode ? 'compact' : 'compact-customer'}">
                             <div class="settings-form-group">
                                 <label for="postFreightCep">CEP</label>
                                 <input type="text" id="postFreightCep" maxlength="9" placeholder="00000-000" value="${budget.cep || ''}">
                             </div>
-                            <div class="settings-form-group">
+                            ${isAdminMode ? `<div class="settings-form-group">
                                 <label for="postFreightValue">Valor do frete (R$)</label>
                                 <input type="number" id="postFreightValue" min="0" step="0.01" placeholder="0,00" value="${Number(budget.freight || 0) || ''}">
-                            </div>
+                            </div>` : ''}
                             <div class="settings-form-group">
                                 <label for="postFreightState">UF</label>
                                 <input type="text" id="postFreightState" maxlength="2" placeholder="PR" value="${budget.state || ''}">
@@ -1262,7 +1262,7 @@
                         </div>
                         <div id="postFreightFeedback" class="sale-cep-feedback"></div>
                         <div class="form-actions post-freight-actions">
-                            <button type="button" id="savePostBudgetFreight"><i class="fas fa-save"></i> Salvar entrega e frete</button>
+                            <button type="button" id="savePostBudgetFreight"><i class="fas fa-save"></i> ${isAdminMode ? 'Salvar entrega e frete' : 'Salvar entrega'}</button>
                             <button type="button" class="cancel-btn">${isAdminMode ? 'Fechar' : 'Combinar depois'}</button>
                         </div>
                     </div>
@@ -1305,7 +1305,7 @@
                 wrapper.querySelector('#postFreightNeighborhood').value = data.bairro || '';
                 wrapper.querySelector('#postFreightCity').value = data.localidade || '';
                 wrapper.querySelector('#postFreightState').value = data.uf || '';
-                setFeedback('Endereco preenchido pelo CEP. Complete numero e valor do frete.', 'success');
+                setFeedback(`Endereco preenchido pelo CEP. Complete ${isAdminMode ? 'numero e frete' : 'o numero'} para finalizar.`, 'success');
             } catch (error) {
                 console.error('Erro ao buscar CEP do frete:', error);
                 setFeedback('Nao foi possivel buscar o CEP agora. Preencha manualmente.', 'error');
@@ -1314,7 +1314,7 @@
 
         wrapper.querySelector('#savePostBudgetFreight')?.addEventListener('click', async function () {
             const button = this;
-            const freight = parseFloat(String(wrapper.querySelector('#postFreightValue')?.value || '0').replace(',', '.'));
+            const freight = parseFloat(String(wrapper.querySelector('#postFreightValue')?.value || budget.freight || '0').replace(',', '.'));
             const street = wrapper.querySelector('#postFreightStreet')?.value.trim() || '';
             const number = wrapper.querySelector('#postFreightNumber')?.value.trim() || '';
             const complement = wrapper.querySelector('#postFreightComplement')?.value.trim() || '';
@@ -1349,7 +1349,7 @@
                 await persistDataToServer();
                 if (currentUser) openCustomerArea('budgets');
                 if (document.getElementById('adminPanel')) refreshAdminViews();
-                showMessage('Dados de entrega e frete salvos no orcamento.', 'success');
+                showMessage(`Dados de ${isAdminMode ? 'entrega e frete' : 'entrega'} salvos no orcamento.`, 'success');
                 close();
             } catch (error) {
                 console.error('Erro ao salvar frete do orcamento:', error);

@@ -7406,6 +7406,10 @@ textarea:focus {
     grid-template-columns: minmax(170px, 0.8fr) minmax(180px, 0.9fr) minmax(110px, 0.45fr) !important;
 }
 
+.post-freight-form-grid.compact-customer {
+    grid-template-columns: minmax(170px, 0.95fr) minmax(110px, 0.45fr) !important;
+}
+
 .post-budget-freight-modal .settings-form-group {
     display: grid !important;
     gap: 8px !important;
