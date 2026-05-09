@@ -127,6 +127,11 @@
         const targetDate = String(reservationDate || '').trim();
         if (!targetDate) return 0;
 
+        const reservationIndexQuantity = Number(window.reservationIndex?.[targetDate]?.[Number(productId)] || 0);
+        if (!currentUser?.isAdmin && reservationIndexQuantity > 0) {
+            return reservationIndexQuantity;
+        }
+
         return savedBudgets.reduce((sum, budget) => {
             if (String(budget.status || '') === 'Cancelado') return sum;
             if (budget.inventoryCommitted) return sum;
@@ -677,9 +682,112 @@
         return data;
     }
 
+    async function getJsonWithResponse(path, timeoutMs = 15000) {
+        const response = await fetchWithTimeout(`${getServerBaseUrl()}${path}`, {
+            headers: { Accept: 'application/json' }
+        }, timeoutMs);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data?.message || `Falha ao carregar ${path}.`);
+        }
+        return data;
+    }
+
+    async function updateBudgetOnServer(budget, timeoutMs = 20000) {
+        return postJsonWithResponse(`/api/budgets/${budget.id}`, {
+            budget,
+            guestAccess: {
+                email: budget?.userEmail || '',
+                phone: budget?.userPhone || ''
+            }
+        }, timeoutMs);
+    }
+
+    async function deleteBudgetOnServer(budgetId, timeoutMs = 20000) {
+        const response = await fetchWithTimeout(`${getServerBaseUrl()}/api/budgets/${budgetId}`, {
+            method: 'DELETE',
+            headers: { Accept: 'application/json' }
+        }, timeoutMs);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data?.message || 'Nao foi possivel excluir o orcamento.');
+        }
+        return data;
+    }
+
+    function buildClientCacheSnapshot() {
+        if (typeof normalizeAppData === 'function') normalizeAppData();
+        normalizeProductImageCollections();
+        const baseSnapshot = {
+            updatedAt: new Date().toISOString(),
+            products,
+            companyData,
+            reservationIndex: window.reservationIndex || {}
+        };
+
+        if (currentUser?.isAdmin) {
+            return {
+                ...baseSnapshot,
+                users,
+                savedBudgets,
+                stockMovements,
+                financialEntries,
+                accessHistory,
+                leadContacts,
+                logisticsEntries,
+                sessionUser: currentUser
+            };
+        }
+
+        if (currentUser) {
+            return {
+                ...baseSnapshot,
+                savedBudgets: getCurrentCustomerBudgets(),
+                sessionUser: currentUser
+            };
+        }
+
+        return {
+            ...baseSnapshot,
+            savedBudgets: Array.isArray(savedBudgets) ? savedBudgets.filter(budget => !budget.userId) : []
+        };
+    }
+
+    function sanitizeClientCacheSnapshot(snapshot = {}) {
+        const safeSnapshot = {
+            updatedAt: snapshot.updatedAt || new Date().toISOString(),
+            products: Array.isArray(snapshot.products) ? snapshot.products : [],
+            companyData: snapshot.companyData || {},
+            reservationIndex: snapshot.reservationIndex || {}
+        };
+
+        if (Array.isArray(snapshot.savedBudgets)) {
+            safeSnapshot.savedBudgets = snapshot.savedBudgets;
+        }
+
+        if (snapshot.sessionUser) {
+            safeSnapshot.sessionUser = snapshot.sessionUser;
+        }
+
+        if (currentUser?.isAdmin) {
+            safeSnapshot.users = Array.isArray(snapshot.users) ? snapshot.users.map(user => {
+                const { password, passwordHash, resetToken, resetTokenExpiresAt, ...safeUser } = user || {};
+                return safeUser;
+            }) : [];
+            safeSnapshot.stockMovements = Array.isArray(snapshot.stockMovements) ? snapshot.stockMovements : [];
+            safeSnapshot.financialEntries = Array.isArray(snapshot.financialEntries) ? snapshot.financialEntries : [];
+            safeSnapshot.accessHistory = Array.isArray(snapshot.accessHistory) ? snapshot.accessHistory : [];
+            safeSnapshot.leadContacts = Array.isArray(snapshot.leadContacts) ? snapshot.leadContacts : [];
+            safeSnapshot.logisticsEntries = Array.isArray(snapshot.logisticsEntries) ? snapshot.logisticsEntries : [];
+        }
+
+        return safeSnapshot;
+    }
+
     function buildAppSnapshot() {
         if (typeof normalizeAppData === 'function') normalizeAppData();
         normalizeProductImageCollections();
+        if (!currentUser?.isAdmin) return buildClientCacheSnapshot();
         return {
             updatedAt: new Date().toISOString(),
             products,
@@ -696,6 +804,7 @@
 
     async function persistDataToServer() {
         if (!window.location?.protocol?.startsWith('http')) return false;
+        if (!currentUser?.isAdmin) return false;
         try {
             const response = await fetch(`${getServerBaseUrl()}/api/app-data`, {
                 method: 'POST',
@@ -722,14 +831,19 @@
 
     function applyAppSnapshot(snapshot = {}) {
         if (snapshot.products) products = snapshot.products;
-        if (snapshot.users) users = snapshot.users;
-        if (snapshot.savedBudgets) savedBudgets = snapshot.savedBudgets;
+        users = Array.isArray(snapshot.users) ? snapshot.users : (currentUser?.isAdmin ? users : []);
+        savedBudgets = Array.isArray(snapshot.savedBudgets) ? snapshot.savedBudgets : [];
         if (snapshot.companyData) Object.assign(companyData, snapshot.companyData);
-        if (snapshot.stockMovements) stockMovements = snapshot.stockMovements;
-        if (snapshot.financialEntries) financialEntries = snapshot.financialEntries;
-        accessHistory = Array.isArray(snapshot.accessHistory) ? snapshot.accessHistory : accessHistory;
-        leadContacts = Array.isArray(snapshot.leadContacts) ? snapshot.leadContacts : leadContacts;
-        logisticsEntries = Array.isArray(snapshot.logisticsEntries) ? snapshot.logisticsEntries : logisticsEntries;
+        stockMovements = Array.isArray(snapshot.stockMovements) ? snapshot.stockMovements : (currentUser?.isAdmin ? stockMovements : []);
+        financialEntries = Array.isArray(snapshot.financialEntries) ? snapshot.financialEntries : (currentUser?.isAdmin ? financialEntries : []);
+        accessHistory = Array.isArray(snapshot.accessHistory) ? snapshot.accessHistory : (currentUser?.isAdmin ? accessHistory : []);
+        leadContacts = Array.isArray(snapshot.leadContacts) ? snapshot.leadContacts : (currentUser?.isAdmin ? leadContacts : []);
+        logisticsEntries = Array.isArray(snapshot.logisticsEntries) ? snapshot.logisticsEntries : (currentUser?.isAdmin ? logisticsEntries : []);
+        window.reservationIndex = snapshot.reservationIndex || window.reservationIndex || {};
+        if (snapshot.sessionUser) {
+            currentUser = snapshot.sessionUser;
+            sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+        }
         normalizeProductCategories();
         normalizeProductImageCollections();
         if (typeof normalizeAppData === 'function') normalizeAppData();
@@ -737,12 +851,12 @@
 
     function getLocalSnapshot() {
         try {
-            const primarySnapshot = JSON.parse(
+            const primarySnapshot = sanitizeClientCacheSnapshot(JSON.parse(
                 localStorage.getItem('mobilierShadowData')
                 || localStorage.getItem('mobilierData')
                 || 'null'
-            );
-            const criticalSnapshot = JSON.parse(localStorage.getItem('mobilierCriticalShadowData') || 'null');
+            ) || {});
+            const criticalSnapshot = sanitizeClientCacheSnapshot(JSON.parse(localStorage.getItem('mobilierCriticalShadowData') || 'null') || {});
             const primaryTime = new Date(primarySnapshot?.updatedAt || 0).getTime();
             const criticalTime = new Date(criticalSnapshot?.updatedAt || 0).getTime();
             return criticalTime > primaryTime ? criticalSnapshot : primarySnapshot;
@@ -757,17 +871,25 @@
 
         const localSnapshot = getLocalSnapshot();
         let remoteSnapshot = null;
+        let authenticatedUser = null;
+        let sessionLoaded = false;
 
         try {
-            const response = await fetch(`${getServerBaseUrl()}/api/app-data`, {
-                headers: { Accept: 'application/json' }
-            });
-            if (response.ok) {
-                const payload = await response.json().catch(() => ({}));
-                remoteSnapshot = payload?.data || null;
-            }
+            const sessionPayload = await getJsonWithResponse('/api/auth/session');
+            sessionLoaded = true;
+            authenticatedUser = sessionPayload?.user || null;
+            const appPayload = await getJsonWithResponse('/api/app-data');
+            remoteSnapshot = appPayload?.data || null;
         } catch (error) {
             console.warn('Nao foi possivel carregar o snapshot remoto:', error);
+        }
+
+        if (authenticatedUser) {
+            currentUser = authenticatedUser;
+            sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+        } else if (sessionLoaded && currentUser && window.location?.protocol?.startsWith('http')) {
+            currentUser = null;
+            sessionStorage.removeItem('currentUser');
         }
 
         const localTime = new Date(localSnapshot?.updatedAt || 0).getTime();
@@ -783,12 +905,13 @@
             return;
         }
 
-        if (localSnapshot && localTime >= remoteTime) {
+        if (currentUser?.isAdmin && localSnapshot && localTime >= remoteTime) {
             applyAppSnapshot(localSnapshot);
             try {
-                localStorage.setItem('mobilierData', JSON.stringify(localSnapshot));
-                localStorage.setItem('mobilierShadowData', JSON.stringify(localSnapshot));
-                localStorage.setItem('mobilierCriticalShadowData', JSON.stringify(localSnapshot));
+                const safeSnapshot = buildClientCacheSnapshot();
+                localStorage.setItem('mobilierData', JSON.stringify(safeSnapshot));
+                localStorage.setItem('mobilierShadowData', JSON.stringify(safeSnapshot));
+                localStorage.setItem('mobilierCriticalShadowData', JSON.stringify(safeSnapshot));
             } catch (error) {
                 console.warn('Nao foi possivel restaurar o snapshot local:', error);
             }
@@ -803,10 +926,7 @@
         if (remoteSnapshot) {
             applyAppSnapshot(remoteSnapshot);
             try {
-                const normalizedRemoteSnapshot = {
-                    ...remoteSnapshot,
-                    updatedAt: remoteSnapshot.updatedAt || new Date().toISOString()
-                };
+                const normalizedRemoteSnapshot = buildClientCacheSnapshot();
                 localStorage.setItem('mobilierData', JSON.stringify(normalizedRemoteSnapshot));
                 localStorage.setItem('mobilierShadowData', JSON.stringify(normalizedRemoteSnapshot));
                 localStorage.setItem('mobilierCriticalShadowData', JSON.stringify(normalizedRemoteSnapshot));
@@ -822,12 +942,12 @@
 
     saveToLocalStorage = function () {
         try {
-            const snapshot = buildAppSnapshot();
+            const snapshot = buildClientCacheSnapshot();
             protectLocalStateUntil = Date.now() + 15000;
             localStorage.setItem('mobilierData', JSON.stringify(snapshot));
             localStorage.setItem('mobilierShadowData', JSON.stringify(snapshot));
             localStorage.setItem('mobilierCriticalShadowData', JSON.stringify(snapshot));
-            queueServerSync();
+            if (currentUser?.isAdmin) queueServerSync();
         } catch (error) {
             console.error('Erro ao salvar dados localmente:', error);
         }
@@ -1429,7 +1549,15 @@
                 syncFinancialEntriesFromBudgets();
                 createLogisticsFromBudget(budget, budget.eventDetails?.responsible || budget.userName || '');
                 saveToLocalStorage();
-                await persistDataToServer();
+                if (currentUser?.isAdmin) {
+                    await persistDataToServer();
+                } else if (currentUser || budget.userEmail) {
+                    const response = await updateBudgetOnServer(budget);
+                    if (currentUser) {
+                        applyAppSnapshot(response?.data || {});
+                    }
+                    saveToLocalStorage();
+                }
                 if (currentUser) openCustomerArea('budgets');
                 if (document.getElementById('adminPanel')) refreshAdminViews();
                 showMessage(`Dados de ${isAdminMode ? 'entrega e frete' : 'entrega'} salvos no orcamento.`, 'success');
@@ -1563,9 +1691,11 @@
         wrapper.querySelectorAll('.customer-delete-budget').forEach(button => button.addEventListener('click', function () {
             const budgetId = parseInt(this.dataset.id, 10);
             if (!confirm('Deseja excluir este orcamento?')) return;
-            deleteBudget(budgetId);
-            openCustomerArea('budgets');
-            showMessage('Orcamento excluido com sucesso.', 'success');
+            Promise.resolve(deleteBudget(budgetId)).then(removed => {
+                if (!removed) return;
+                openCustomerArea('budgets');
+                showMessage('Orcamento excluido com sucesso.', 'success');
+            });
         }));
         wrapper.querySelector('#editCustomerProfileBtn')?.addEventListener('click', function () {
             openRegistrationModal(users.find(user => user.id === currentUser.id) || currentUser);
@@ -2211,20 +2341,16 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         }
 
         try {
-            users.push({
-                id: users.length ? Math.max(...users.map(user => Number(user.id) || 0)) + 1 : 1,
+            const response = await postJsonWithResponse('/api/auth/register', {
                 name,
                 email,
                 phone,
                 password,
                 address,
-                isAdmin: userType === 'admin',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            });
-
+                isAdmin: userType === 'admin'
+            }, 20000);
+            applyAppSnapshot(response?.data || {});
             saveToLocalStorage();
-            await persistDataToServer();
 
             let emailFailed = false;
             try {
@@ -2343,11 +2469,24 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         setSaveBudgetButtonState(true);
 
         try {
-            savedBudgets.unshift(budget);
-            createLogisticsFromBudget(budget, eventDetails.responsible);
+            const payload = await postJsonWithResponse('/api/budgets', {
+                ...budget,
+                lead: leadIdentity
+            }, 20000);
+            const persistedBudget = payload?.budget || budget;
+
+            if (currentUser?.isAdmin) {
+                applyAppSnapshot(payload?.data || {});
+            } else if (currentUser) {
+                savedBudgets = Array.isArray(payload?.data?.savedBudgets) ? payload.data.savedBudgets : [persistedBudget, ...savedBudgets];
+            } else {
+                savedBudgets.unshift(persistedBudget);
+                window.reservationIndex = payload?.data?.reservationIndex || window.reservationIndex || {};
+            }
+
+            createLogisticsFromBudget(persistedBudget, eventDetails.responsible);
             syncFinancialEntriesFromBudgets();
             saveToLocalStorage();
-            await persistDataToServer();
 
             cart = [];
             clearEventBriefForm();
@@ -2361,66 +2500,15 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                 unlockBudgetSection(true);
             }
             showMessage('Orcamento salvo com sucesso. Ele ja esta na sua area e no painel administrativo.', 'success');
-            setTimeout(() => openPostBudgetFreightModal(budget.id), 350);
-
-            if (budget.userEmail) {
-                postJson('/api/budget-email', {
-                    email: budget.userEmail,
-                    customerName: budget.userName,
-                    budgetId: budget.id,
-                    total: formatCurrencyBRL(budget.total || 0),
-                    eventName: budget.eventDetails?.eventName || budget.eventDetails?.type || 'Evento',
-                    deliveryDate: budget.eventDetails?.deliveryDate || '',
-                    deliveryTime: budget.eventDetails?.deliveryTime || '',
-                    address: budget.eventDetails?.deliveryAddress || '',
-                    items: budget.items || []
-                }, 10000).catch(error => {
-                    console.error('Erro ao enviar e-mail do orcamento:', error);
-                });
-            }
+            setTimeout(() => openPostBudgetFreightModal(persistedBudget.id), 350);
+        } catch (error) {
+            console.error('Erro ao salvar orcamento:', error);
+            showMessage(error.message || 'Nao foi possivel salvar agora. Tente novamente.', 'error');
         } finally {
             isSavingBudgetNow = false;
             setSaveBudgetButtonState(false);
         }
     };
-
-    async function findAuthenticatedUser(email, password) {
-        const normalizedEmail = String(email || '').trim().toLowerCase();
-        const normalizedPassword = String(password || '');
-        const localUser = users.find(item =>
-            String(item.email || '').trim().toLowerCase() === normalizedEmail
-            && String(item.password || '') === normalizedPassword
-        );
-        if (localUser) return { ...localUser };
-
-        if (!window.location?.protocol?.startsWith('http')) return null;
-
-        try {
-            const response = await fetch(`${getServerBaseUrl()}/api/app-data`, {
-                headers: { Accept: 'application/json' }
-            });
-            if (!response.ok) return null;
-            const payload = await response.json().catch(() => ({}));
-            const remoteSnapshot = payload?.data || null;
-            const remoteUsers = Array.isArray(remoteSnapshot?.users) ? remoteSnapshot.users : [];
-            const remoteUser = remoteUsers.find(item =>
-                String(item.email || '').trim().toLowerCase() === normalizedEmail
-                && String(item.password || '') === normalizedPassword
-            );
-
-            if (!remoteUser) return null;
-
-            if (remoteSnapshot) {
-                applyAppSnapshot(remoteSnapshot);
-                saveToLocalStorage();
-            }
-
-            return { ...remoteUser };
-        } catch (error) {
-            console.warn('Falha ao consultar usuarios atualizados para login:', error);
-            return null;
-        }
-    }
 
     handleLogin = async function () {
         const email = document.getElementById('loginEmail')?.value.trim().toLowerCase();
@@ -2437,24 +2525,9 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                 return;
             }
 
-            let authenticatedUser = null;
-            if (email === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
-                authenticatedUser = {
-                    id: 0,
-                    email: ADMIN_CREDENTIALS.email,
-                    name: ADMIN_CREDENTIALS.name,
-                    isAdmin: true
-                };
-            } else {
-                const user = await findAuthenticatedUser(email, password);
-                if (!user) {
-                    showLoginMessage('E-mail ou senha incorretos.', 'error');
-                    return;
-                }
-                authenticatedUser = { ...user };
-            }
-
-            currentUser = authenticatedUser;
+            const payload = await postJsonWithResponse('/api/auth/login', { email, password }, 20000);
+            currentUser = payload?.user || null;
+            applyAppSnapshot(payload?.data || {});
             sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
             forceCloseLoginModal();
             updateUserState();
@@ -2499,12 +2572,90 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         }
     };
 
-    saveRegistrationForm = function (userId = null) {
-        if (originalSaveRegistrationForm) {
-            originalSaveRegistrationForm(userId);
-            setTimeout(() => {
-                if (currentUser) applyPendingBudgetIntent();
-            }, 120);
+    saveRegistrationForm = async function (userId = null) {
+        const isEditing = Boolean(userId && currentUser);
+        const name = document.getElementById('regName')?.value.trim() || '';
+        const email = document.getElementById('regEmail')?.value.trim().toLowerCase() || '';
+        const phone = document.getElementById('regPhone')?.value.trim() || '';
+        const cpf = document.getElementById('regCpf')?.value.trim() || '';
+        const cep = document.getElementById('regCep')?.value.trim() || '';
+        const street = document.getElementById('regStreet')?.value.trim() || '';
+        const number = document.getElementById('regNumber')?.value.trim() || '';
+        const complement = document.getElementById('regComplement')?.value.trim() || '';
+        const neighborhood = document.getElementById('regNeighborhood')?.value.trim() || '';
+        const cityState = document.getElementById('regCity')?.value.trim() || '';
+        const notes = document.getElementById('regNotes')?.value.trim() || '';
+        const password = document.getElementById('regPassword')?.value || '';
+        const address = [street, number, complement, neighborhood, cityState].filter(Boolean).join(', ');
+        const registrationMessage = document.getElementById('registrationMessage');
+
+        const showRegistrationFeedback = (message, type = 'error') => {
+            if (registrationMessage) {
+                registrationMessage.textContent = message;
+                registrationMessage.className = `login-message ${type}`;
+            } else {
+                showMessage(message, type === 'error' ? 'error' : 'info');
+            }
+        };
+
+        if (!name || !email || (!isEditing && !password)) {
+            showRegistrationFeedback('Preencha nome, e-mail e senha para continuar.');
+            return;
+        }
+
+        const payload = {
+            name,
+            email,
+            phone,
+            cpf,
+            cep,
+            street,
+            number,
+            complement,
+            neighborhood,
+            cityState,
+            address,
+            notes
+        };
+
+        try {
+            let response;
+            if (isEditing) {
+                response = await postJsonWithResponse('/api/auth/profile', payload, 20000);
+            } else {
+                response = await postJsonWithResponse('/api/auth/register', {
+                    ...payload,
+                    password
+                }, 20000);
+                await postJson('/api/registration-email', {
+                    name,
+                    email,
+                    phone,
+                    address,
+                    notes
+                }, 10000).catch(error => console.error('Erro ao enviar e-mail de cadastro:', error));
+            }
+
+            currentUser = response?.user || currentUser;
+            applyAppSnapshot(response?.data || {});
+            saveToLocalStorage();
+            document.getElementById('registrationModal')?.remove();
+            updateUserState();
+
+            if (isEditing) {
+                showMessage('Cadastro atualizado com sucesso.', 'success');
+                if (document.getElementById('customerAreaModal') && currentUser && !currentUser.isAdmin) {
+                    openCustomerArea('profile');
+                }
+            } else {
+                showMessage(`Conta criada com sucesso! Bem-vindo(a), ${currentUser?.name || name}!`, 'success');
+                setTimeout(() => {
+                    if (currentUser) applyPendingBudgetIntent();
+                }, 120);
+            }
+        } catch (error) {
+            console.error('Erro ao salvar cadastro:', error);
+            showRegistrationFeedback(error.message || 'Nao foi possivel salvar o cadastro agora.');
         }
     };
 
@@ -2519,13 +2670,18 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         }
     };
 
-    logout = function () {
+    logout = async function () {
         if (typeof currentAccessSession !== 'undefined') {
             currentAccessSession = null;
         }
         document.getElementById('leadCaptureModal')?.remove();
         if (originalLogout) {
             originalLogout();
+        }
+        try {
+            await postJsonWithResponse('/api/auth/logout', {}, 10000);
+        } catch (error) {
+            console.warn('Falha ao encerrar sessao no servidor:', error);
         }
         currentUser = null;
         sessionStorage.removeItem('currentUser');
@@ -2540,7 +2696,56 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         updateBudgetSummary();
         renderProducts();
         renderBudgetItems();
+        showMessage('Logout realizado com sucesso.', 'success');
     };
+
+    const originalDeleteBudget = typeof deleteBudget === 'function' ? deleteBudget : null;
+    deleteBudget = async function (budgetId) {
+        const budget = savedBudgets.find(item => Number(item.id) === Number(budgetId));
+        if (!budget) return false;
+
+        const previousBudgets = [...savedBudgets];
+        savedBudgets = savedBudgets.filter(item => Number(item.id) !== Number(budgetId));
+        syncFinancialEntriesFromBudgets();
+        saveToLocalStorage();
+        renderProducts();
+        renderBudgetItems();
+        if (document.getElementById('adminPanel')) refreshAdminViews();
+
+        if (currentUser) {
+            try {
+                const response = await deleteBudgetOnServer(budgetId);
+                applyAppSnapshot(response?.data || {});
+                saveToLocalStorage();
+            } catch (error) {
+                console.error('Erro ao excluir orcamento:', error);
+                savedBudgets = previousBudgets;
+                syncFinancialEntriesFromBudgets();
+                saveToLocalStorage();
+                renderProducts();
+                renderBudgetItems();
+                if (document.getElementById('adminPanel')) refreshAdminViews();
+                showMessage(error.message || 'Nao foi possivel excluir o orcamento.', 'error');
+                return false;
+            }
+        } else if (originalDeleteBudget) {
+            originalDeleteBudget(budgetId);
+        }
+        return true;
+    };
+    window.deleteBudget = deleteBudget;
+    globalThis.deleteBudget = deleteBudget;
+
+    const originalDeleteBudgetAdmin = typeof deleteBudgetAdmin === 'function' ? deleteBudgetAdmin : null;
+    deleteBudgetAdmin = async function (budgetId) {
+        if (!confirm('Excluir este pedido permanentemente?')) return;
+        const removed = await deleteBudget(budgetId);
+        if (!removed) return;
+        if (document.getElementById('adminPanel')) refreshAdminViews();
+        showAdminMessage('Pedido excluido com sucesso.', 'success');
+    };
+    window.deleteBudgetAdmin = deleteBudgetAdmin;
+    globalThis.deleteBudgetAdmin = deleteBudgetAdmin;
 
     window.openBudgetCancellationModal = function (budgetId) {
         const budget = savedBudgets.find(item => Number(item.id) === Number(budgetId));
@@ -3947,17 +4152,6 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                     const data = await response.json().catch(() => ({}));
                     if (!response.ok) throw new Error(data?.message || 'Nao foi possivel salvar a nova senha.');
 
-                    const normalizedEmail = String(email || '').trim().toLowerCase();
-                    const userIndex = users.findIndex(item => String(item.email || '').trim().toLowerCase() === normalizedEmail);
-                    if (userIndex >= 0) {
-                        users[userIndex] = {
-                            ...users[userIndex],
-                            password: newPassword,
-                            updatedAt: new Date().toISOString()
-                        };
-                        saveToLocalStorage();
-                    }
-
                     try {
                         await reconcileAppPersistence();
                     } catch (error) {
@@ -4926,7 +5120,13 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                 budget.updatedAt = new Date().toISOString();
                 syncFinancialEntriesFromBudgets();
                 saveToLocalStorage();
-                await persistDataToServer();
+                if (currentUser?.isAdmin) {
+                    await persistDataToServer();
+                } else if (currentUser) {
+                    const response = await updateBudgetOnServer(budget);
+                    applyAppSnapshot(response?.data || {});
+                    saveToLocalStorage();
+                }
                 if (document.getElementById('adminPanel')) refreshAdminViews();
                 if (document.getElementById('customerAreaModal') && currentUser && !currentUser.isAdmin) {
                     openCustomerArea('budgets');

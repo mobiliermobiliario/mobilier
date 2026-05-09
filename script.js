@@ -103,7 +103,7 @@ let financialEntries = [];
 
 const ADMIN_CREDENTIALS = {
     email: "mobiliermobiliario@gmail.com",
-    password: "admin20262026",
+    password: "",
     name: "Administrador",
     isAdmin: true
 };
@@ -206,7 +206,6 @@ function initializeUsers() {
         users.push({
             id: 1,
             email: ADMIN_CREDENTIALS.email,
-            password: ADMIN_CREDENTIALS.password,
             name: ADMIN_CREDENTIALS.name,
             isAdmin: true,
             createdAt: new Date().toISOString()

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,8 +17,18 @@ const app = express();
 const port = Number(process.env.PORT || 3001);
 const projectRoot = path.resolve(__dirname, '..');
 const dataDir = path.join(__dirname, 'data');
+const dataTemplateFile = path.join(dataDir, 'app-data.example.json');
 const dataFile = path.join(dataDir, 'app-data.json');
 const uploadDir = path.join(dataDir, 'uploads');
+const SESSION_COOKIE_NAME = 'mobilier_session';
+const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD_ROUNDS = 10;
+const sessions = new Map();
+const adminDefaults = {
+    email: String(process.env.ADMIN_EMAIL || 'mobiliermobiliario@gmail.com').trim().toLowerCase(),
+    password: String(process.env.ADMIN_PASSWORD || 'admin20262026'),
+    name: String(process.env.ADMIN_NAME || 'Administrador')
+};
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:3001,http://localhost:3001')
     .split(',')
     .map(origin => origin.trim())
@@ -35,6 +46,7 @@ const allowedDataKeys = [
     'logisticsEntries'
 ];
 
+app.set('trust proxy', 1);
 app.use(cors({
     origin(origin, callback) {
         if (!origin || allowedOrigins.includes(origin)) {
@@ -45,6 +57,193 @@ app.use(cors({
     }
 }));
 app.use(express.json({ limit: '15mb' }));
+
+function parseCookies(cookieHeader = '') {
+    return String(cookieHeader || '')
+        .split(';')
+        .map(cookie => cookie.trim())
+        .filter(Boolean)
+        .reduce((accumulator, cookie) => {
+            const separatorIndex = cookie.indexOf('=');
+            if (separatorIndex === -1) return accumulator;
+            const key = cookie.slice(0, separatorIndex).trim();
+            const value = cookie.slice(separatorIndex + 1).trim();
+            accumulator[key] = decodeURIComponent(value);
+            return accumulator;
+        }, {});
+}
+
+function setSessionCookie(request, response, token) {
+    const isSecure = request.secure || String(request.headers['x-forwarded-proto'] || '').includes('https');
+    const parts = [
+        `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+        'Path=/',
+        'HttpOnly',
+        'SameSite=Lax',
+        `Max-Age=${Math.floor(SESSION_DURATION_MS / 1000)}`
+    ];
+    if (isSecure) parts.push('Secure');
+    response.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function clearSessionCookie(request, response) {
+    const isSecure = request.secure || String(request.headers['x-forwarded-proto'] || '').includes('https');
+    const parts = [
+        `${SESSION_COOKIE_NAME}=`,
+        'Path=/',
+        'HttpOnly',
+        'SameSite=Lax',
+        'Max-Age=0'
+    ];
+    if (isSecure) parts.push('Secure');
+    response.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function getSessionToken(request) {
+    return parseCookies(request.headers.cookie || '')[SESSION_COOKIE_NAME] || '';
+}
+
+function sanitizeUser(user = {}) {
+    const {
+        password,
+        passwordHash,
+        resetToken,
+        resetTokenExpiresAt,
+        ...safeUser
+    } = user || {};
+    return safeUser;
+}
+
+function buildReservationIndex(savedBudgets = []) {
+    return savedBudgets.reduce((accumulator, budget) => {
+        if (String(budget?.status || '') === 'Cancelado') return accumulator;
+        if (budget?.inventoryCommitted) return accumulator;
+        const budgetDate = String(budget?.eventDetails?.deliveryDate || budget?.eventDetails?.date || '').trim();
+        if (!budgetDate) return accumulator;
+        (budget.items || []).forEach(item => {
+            const productId = Number(item?.id || 0);
+            const quantity = Number(item?.quantity || 0);
+            if (!productId || !quantity) return;
+            if (!accumulator[budgetDate]) accumulator[budgetDate] = {};
+            accumulator[budgetDate][productId] = Number(accumulator[budgetDate][productId] || 0) + quantity;
+        });
+        return accumulator;
+    }, {});
+}
+
+function getPublicAppData(appData = {}) {
+    return {
+        updatedAt: appData.updatedAt || null,
+        products: Array.isArray(appData.products) ? appData.products : [],
+        companyData: appData.companyData || {},
+        reservationIndex: buildReservationIndex(appData.savedBudgets || [])
+    };
+}
+
+function budgetBelongsToUser(budget = {}, user = {}) {
+    const userId = Number(user?.id || 0);
+    const userEmail = String(user?.email || '').trim().toLowerCase();
+    const userPhone = String(user?.phone || '').trim();
+    const budgetEmail = String(budget?.userEmail || '').trim().toLowerCase();
+    const budgetPhone = String(budget?.userPhone || '').trim();
+    return Number(budget?.userId || 0) === userId
+        || (!!userEmail && budgetEmail === userEmail)
+        || (!!userPhone && budgetPhone === userPhone);
+}
+
+function buildCustomerAppData(appData = {}, user = {}) {
+    return {
+        ...getPublicAppData(appData),
+        sessionUser: sanitizeUser(user),
+        savedBudgets: Array.isArray(appData.savedBudgets)
+            ? appData.savedBudgets.filter(budget => budgetBelongsToUser(budget, user))
+            : []
+    };
+}
+
+function buildAdminAppData(appData = {}, user = {}) {
+    return {
+        updatedAt: appData.updatedAt || null,
+        products: Array.isArray(appData.products) ? appData.products : [],
+        users: Array.isArray(appData.users) ? appData.users.map(sanitizeUser) : [],
+        savedBudgets: Array.isArray(appData.savedBudgets) ? appData.savedBudgets : [],
+        companyData: appData.companyData || {},
+        stockMovements: Array.isArray(appData.stockMovements) ? appData.stockMovements : [],
+        financialEntries: Array.isArray(appData.financialEntries) ? appData.financialEntries : [],
+        accessHistory: Array.isArray(appData.accessHistory) ? appData.accessHistory : [],
+        leadContacts: Array.isArray(appData.leadContacts) ? appData.leadContacts : [],
+        logisticsEntries: Array.isArray(appData.logisticsEntries) ? appData.logisticsEntries : [],
+        reservationIndex: buildReservationIndex(appData.savedBudgets || []),
+        sessionUser: sanitizeUser(user)
+    };
+}
+
+function buildAppDataForRequest(appData = {}, user = null) {
+    if (!user) return getPublicAppData(appData);
+    if (user.isAdmin) return buildAdminAppData(appData, user);
+    return buildCustomerAppData(appData, user);
+}
+
+async function hashPassword(password = '') {
+    return bcrypt.hash(String(password), PASSWORD_ROUNDS);
+}
+
+async function verifyPassword(password = '', passwordHash = '') {
+    if (!passwordHash) return false;
+    return bcrypt.compare(String(password), String(passwordHash));
+}
+
+async function upgradeAppDataSecurity(appData = {}) {
+    const nextData = {
+        updatedAt: appData.updatedAt || null,
+        products: Array.isArray(appData.products) ? appData.products : [],
+        users: Array.isArray(appData.users) ? appData.users : [],
+        savedBudgets: Array.isArray(appData.savedBudgets) ? appData.savedBudgets : [],
+        companyData: appData.companyData || {},
+        stockMovements: Array.isArray(appData.stockMovements) ? appData.stockMovements : [],
+        financialEntries: Array.isArray(appData.financialEntries) ? appData.financialEntries : [],
+        accessHistory: Array.isArray(appData.accessHistory) ? appData.accessHistory : [],
+        leadContacts: Array.isArray(appData.leadContacts) ? appData.leadContacts : [],
+        logisticsEntries: Array.isArray(appData.logisticsEntries) ? appData.logisticsEntries : []
+    };
+    let changed = false;
+
+    const normalizedUsers = [];
+    for (const rawUser of nextData.users) {
+        const user = { ...rawUser };
+        if (!user.id) {
+            user.id = normalizedUsers.length ? Math.max(...normalizedUsers.map(item => Number(item.id) || 0)) + 1 : 1;
+            changed = true;
+        }
+        const plainPassword = String(user.password || '');
+        if (!user.passwordHash && plainPassword) {
+            user.passwordHash = await hashPassword(plainPassword);
+            changed = true;
+        }
+        if (user.password !== undefined) {
+            delete user.password;
+            changed = true;
+        }
+        normalizedUsers.push(user);
+    }
+
+    const adminExists = normalizedUsers.some(user => String(user.email || '').trim().toLowerCase() === adminDefaults.email);
+    if (!adminExists) {
+        normalizedUsers.unshift({
+            id: normalizedUsers.length ? Math.max(...normalizedUsers.map(item => Number(item.id) || 0)) + 1 : 1,
+            email: adminDefaults.email,
+            name: adminDefaults.name,
+            isAdmin: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            passwordHash: await hashPassword(adminDefaults.password)
+        });
+        changed = true;
+    }
+
+    nextData.users = normalizedUsers;
+    return { data: nextData, changed };
+}
 
 app.use('/backend', (_request, response) => {
     response.status(403).json({ ok: false, message: 'Acesso negado.' });
@@ -63,14 +262,25 @@ async function ensureDataFile() {
     try {
         await fs.access(dataFile);
     } catch {
-        await fs.writeFile(dataFile, JSON.stringify({ updatedAt: null }, null, 2), 'utf8');
+        try {
+            await fs.access(dataTemplateFile);
+            const template = await fs.readFile(dataTemplateFile, 'utf8');
+            await fs.writeFile(dataFile, template, 'utf8');
+        } catch {
+            await fs.writeFile(dataFile, JSON.stringify({ updatedAt: null }, null, 2), 'utf8');
+        }
     }
 }
 
 async function readAppData() {
     await ensureDataFile();
     const raw = await fs.readFile(dataFile, 'utf8');
-    return JSON.parse(raw || '{}');
+    const parsed = JSON.parse(raw || '{}');
+    const { data, changed } = await upgradeAppDataSecurity(parsed);
+    if (changed) {
+        await writeAppData(data);
+    }
+    return data;
 }
 
 async function writeAppData(nextData) {
@@ -86,6 +296,68 @@ function sanitizeAppData(payload = {}) {
         if (key in payload) accumulator[key] = payload[key];
         return accumulator;
     }, {});
+}
+
+function mergeUsersForPersistence(currentUsers = [], incomingUsers = []) {
+    return incomingUsers.map(rawUser => {
+        const user = sanitizeUser(rawUser);
+        const normalizedEmail = String(user.email || '').trim().toLowerCase();
+        const current = currentUsers.find(item =>
+            Number(item.id) === Number(user.id)
+            || (normalizedEmail && String(item.email || '').trim().toLowerCase() === normalizedEmail)
+        );
+        return {
+            ...current,
+            ...user,
+            email: normalizedEmail,
+            passwordHash: current?.passwordHash,
+            updatedAt: new Date().toISOString(),
+            createdAt: current?.createdAt || user.createdAt || new Date().toISOString()
+        };
+    });
+}
+
+function getRequestUser(request, appData = null) {
+    const token = getSessionToken(request);
+    if (!token) return null;
+    const session = sessions.get(token);
+    if (!session) return null;
+    if (session.expiresAt < Date.now()) {
+        sessions.delete(token);
+        return null;
+    }
+    if (!appData) return { id: session.userId };
+    return Array.isArray(appData.users)
+        ? appData.users.find(user => Number(user.id) === Number(session.userId)) || null
+        : null;
+}
+
+function requireAuthenticatedUser(request, response, appData) {
+    const user = getRequestUser(request, appData);
+    if (!user) {
+        response.status(401).json({ ok: false, message: 'Sessao expirada. Entre novamente.' });
+        return null;
+    }
+    return user;
+}
+
+function requireAdminUser(request, response, appData) {
+    const user = requireAuthenticatedUser(request, response, appData);
+    if (!user) return null;
+    if (!user.isAdmin) {
+        response.status(403).json({ ok: false, message: 'Acesso restrito ao administrador.' });
+        return null;
+    }
+    return user;
+}
+
+async function createSessionForUser(request, response, user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, {
+        userId: Number(user.id),
+        expiresAt: Date.now() + SESSION_DURATION_MS
+    });
+    setSessionCookie(request, response, token);
 }
 
 function getPasswordValidationMessage(password) {
@@ -452,10 +724,187 @@ app.get('/api/health', async (_request, response) => {
     });
 });
 
-app.get('/api/app-data', async (_request, response) => {
+app.get('/api/auth/session', async (request, response) => {
     try {
         const appData = await readAppData();
-        response.json({ ok: true, data: appData });
+        const user = getRequestUser(request, appData);
+        response.json({
+            ok: true,
+            authenticated: Boolean(user),
+            user: user ? sanitizeUser(user) : null
+        });
+    } catch (error) {
+        console.error('Erro ao carregar sessao:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel validar a sessao.' });
+    }
+});
+
+app.post('/api/auth/login', async (request, response) => {
+    const email = String(request.body?.email || '').trim().toLowerCase();
+    const password = String(request.body?.password || '');
+
+    if (!email || !password) {
+        response.status(400).json({ ok: false, message: 'Informe e-mail e senha.' });
+        return;
+    }
+
+    try {
+        const appData = await readAppData();
+        const user = Array.isArray(appData.users)
+            ? appData.users.find(item => String(item.email || '').trim().toLowerCase() === email)
+            : null;
+
+        if (!user || !(await verifyPassword(password, user.passwordHash))) {
+            response.status(401).json({ ok: false, message: 'E-mail ou senha incorretos.' });
+            return;
+        }
+
+        await createSessionForUser(request, response, user);
+        response.json({
+            ok: true,
+            user: sanitizeUser(user),
+            data: buildAppDataForRequest(appData, user)
+        });
+    } catch (error) {
+        console.error('Erro ao fazer login:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel entrar agora.' });
+    }
+});
+
+app.post('/api/auth/logout', async (request, response) => {
+    const token = getSessionToken(request);
+    if (token) sessions.delete(token);
+    clearSessionCookie(request, response);
+    response.json({ ok: true });
+});
+
+app.post('/api/auth/register', async (request, response) => {
+    const body = request.body || {};
+    const name = String(body.name || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    const passwordValidationMessage = getPasswordValidationMessage(password);
+
+    if (!name || !email || !password) {
+        response.status(400).json({ ok: false, message: 'Preencha nome, e-mail e senha.' });
+        return;
+    }
+
+    if (passwordValidationMessage) {
+        response.status(400).json({ ok: false, message: passwordValidationMessage });
+        return;
+    }
+
+    try {
+        const appData = await readAppData();
+        const actor = getRequestUser(request, appData);
+        const existingUser = Array.isArray(appData.users)
+            ? appData.users.find(item => String(item.email || '').trim().toLowerCase() === email)
+            : null;
+
+        if (existingUser) {
+            response.status(409).json({ ok: false, message: 'Ja existe um cadastro com este e-mail.' });
+            return;
+        }
+
+        const newUser = {
+            id: appData.users.length ? Math.max(...appData.users.map(user => Number(user.id) || 0)) + 1 : 1,
+            name,
+            email,
+            phone: String(body.phone || '').trim(),
+            cpf: String(body.cpf || '').trim(),
+            cep: String(body.cep || '').trim(),
+            street: String(body.street || '').trim(),
+            number: String(body.number || '').trim(),
+            complement: String(body.complement || '').trim(),
+            neighborhood: String(body.neighborhood || '').trim(),
+            cityState: String(body.cityState || '').trim(),
+            address: String(body.address || '').trim(),
+            notes: String(body.notes || '').trim(),
+            isAdmin: actor?.isAdmin ? Boolean(body.isAdmin) : false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            passwordHash: await hashPassword(password)
+        };
+
+        appData.users.push(newUser);
+        await writeAppData(appData);
+
+        if (actor?.isAdmin) {
+            response.json({
+                ok: true,
+                user: sanitizeUser(newUser),
+                data: buildAppDataForRequest(appData, actor)
+            });
+            return;
+        }
+
+        await createSessionForUser(request, response, newUser);
+        response.json({
+            ok: true,
+            user: sanitizeUser(newUser),
+            data: buildAppDataForRequest(appData, newUser)
+        });
+    } catch (error) {
+        console.error('Erro ao registrar usuario:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel criar o cadastro agora.' });
+    }
+});
+
+app.post('/api/auth/profile', async (request, response) => {
+    try {
+        const appData = await readAppData();
+        const user = requireAuthenticatedUser(request, response, appData);
+        if (!user) return;
+
+        const body = request.body || {};
+        const nextEmail = String(body.email || user.email || '').trim().toLowerCase();
+        const emailOwner = appData.users.find(item =>
+            String(item.email || '').trim().toLowerCase() === nextEmail
+            && Number(item.id) !== Number(user.id)
+        );
+        if (emailOwner) {
+            response.status(409).json({ ok: false, message: 'Este e-mail ja esta em uso.' });
+            return;
+        }
+
+        const updatedUser = {
+            ...user,
+            name: String(body.name || user.name || '').trim(),
+            email: nextEmail,
+            phone: String(body.phone || '').trim(),
+            cpf: String(body.cpf || '').trim(),
+            cep: String(body.cep || '').trim(),
+            street: String(body.street || '').trim(),
+            number: String(body.number || '').trim(),
+            complement: String(body.complement || '').trim(),
+            neighborhood: String(body.neighborhood || '').trim(),
+            cityState: String(body.cityState || '').trim(),
+            address: String(body.address || '').trim(),
+            notes: String(body.notes || '').trim(),
+            updatedAt: new Date().toISOString()
+        };
+
+        const index = appData.users.findIndex(item => Number(item.id) === Number(user.id));
+        appData.users[index] = updatedUser;
+        await writeAppData(appData);
+
+        response.json({
+            ok: true,
+            user: sanitizeUser(updatedUser),
+            data: buildAppDataForRequest(appData, updatedUser)
+        });
+    } catch (error) {
+        console.error('Erro ao atualizar perfil:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel atualizar o cadastro.' });
+    }
+});
+
+app.get('/api/app-data', async (request, response) => {
+    try {
+        const appData = await readAppData();
+        const user = getRequestUser(request, appData);
+        response.json({ ok: true, data: buildAppDataForRequest(appData, user) });
     } catch (error) {
         console.error('Erro ao ler dados:', error);
         response.status(500).json({ ok: false, message: 'Nao foi possivel ler os dados.' });
@@ -465,19 +914,204 @@ app.get('/api/app-data', async (_request, response) => {
 app.post('/api/app-data', async (request, response) => {
     try {
         const currentData = await readAppData();
+        const user = requireAdminUser(request, response, currentData);
+        if (!user) return;
+
         const sanitized = sanitizeAppData(request.body || {});
-        await writeAppData({
+        const nextData = {
             ...currentData,
             ...sanitized
-        });
-        response.json({ ok: true });
+        };
+
+        if (Array.isArray(sanitized.users)) {
+            nextData.users = mergeUsersForPersistence(currentData.users || [], sanitized.users);
+        }
+
+        await writeAppData(nextData);
+        response.json({ ok: true, data: buildAdminAppData(nextData, user) });
     } catch (error) {
         console.error('Erro ao salvar dados:', error);
         response.status(500).json({ ok: false, message: 'Nao foi possivel salvar os dados.' });
     }
 });
 
+app.post('/api/budgets', async (request, response) => {
+    try {
+        const appData = await readAppData();
+        const requestUser = getRequestUser(request, appData);
+        const body = request.body || {};
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (!items.length) {
+            response.status(400).json({ ok: false, message: 'Adicione itens antes de salvar o orcamento.' });
+            return;
+        }
+
+        const eventDetails = body.eventDetails || {};
+        const sessionLead = body.lead || {};
+        const nextBudget = {
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            userId: requestUser?.id || null,
+            userName: String(body.userName || requestUser?.name || sessionLead.name || 'Cliente').trim(),
+            userEmail: String(body.userEmail || requestUser?.email || sessionLead.email || '').trim().toLowerCase(),
+            userPhone: String(body.userPhone || requestUser?.phone || sessionLead.phone || '').trim(),
+            date: String(body.date || new Date().toLocaleDateString('pt-BR')),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            items: items.map(item => ({
+                id: Number(item.id || 0),
+                name: String(item.name || '').trim(),
+                quantity: Number(item.quantity || 0),
+                price: Number(item.price || 0),
+                total: Number(item.total || 0)
+            })).filter(item => item.id && item.quantity > 0),
+            subtotal: Number(body.subtotal || 0),
+            freight: Number(body.freight || 0),
+            total: Number(body.total || 0),
+            cep: String(body.cep || '').trim(),
+            city: String(body.city || '').trim(),
+            state: String(body.state || '').trim(),
+            status: String(body.status || 'Pendente'),
+            eventDetails,
+            notes: String(body.notes || eventDetails.notes || '').trim(),
+            inventoryCommitted: Boolean(body.inventoryCommitted),
+            origin: String(body.origin || 'site-user')
+        };
+
+        appData.savedBudgets = [nextBudget, ...(appData.savedBudgets || [])];
+        await writeAppData(appData);
+
+        if (nextBudget.userEmail) {
+            const message = buildBudgetCreatedEmail({
+                customerName: nextBudget.userName,
+                budgetId: nextBudget.id,
+                total: `R$ ${nextBudget.total.toFixed(2).replace('.', ',')}`,
+                eventName: nextBudget.eventDetails?.eventName || nextBudget.eventDetails?.type || 'Evento',
+                deliveryDate: nextBudget.eventDetails?.deliveryDate || '',
+                deliveryTime: nextBudget.eventDetails?.deliveryTime || '',
+                address: nextBudget.eventDetails?.deliveryAddress || '',
+                items: nextBudget.items || []
+            });
+            try {
+                await sendEmailMessage({
+                    from: process.env.EMAIL_FROM || process.env.RESEND_FROM || process.env.EMAIL_USER,
+                    to: nextBudget.userEmail,
+                    replyTo: process.env.EMAIL_REPLY_TO || process.env.EMAIL_USER,
+                    subject: message.subject,
+                    text: message.text,
+                    html: message.html
+                });
+            } catch (emailError) {
+                console.error('Erro ao enviar e-mail do orcamento:', emailError);
+            }
+        }
+
+        response.json({
+            ok: true,
+            budget: nextBudget,
+            data: buildAppDataForRequest(appData, requestUser)
+        });
+    } catch (error) {
+        console.error('Erro ao salvar orcamento:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel salvar o orcamento.' });
+    }
+});
+
+app.put('/api/budgets/:budgetId', async (request, response) => {
+    try {
+        const appData = await readAppData();
+        const actor = getRequestUser(request, appData);
+
+        const budgetId = Number(request.params.budgetId || 0);
+        const budgetIndex = Array.isArray(appData.savedBudgets)
+            ? appData.savedBudgets.findIndex(item => Number(item.id) === budgetId)
+            : -1;
+        if (budgetIndex === -1) {
+            response.status(404).json({ ok: false, message: 'Orcamento nao encontrado.' });
+            return;
+        }
+
+        const currentBudget = appData.savedBudgets[budgetIndex];
+        const guestAccess = request.body?.guestAccess || {};
+        const guestEmail = String(guestAccess.email || '').trim().toLowerCase();
+        const guestPhone = String(guestAccess.phone || '').trim();
+        const guestCanEdit = !actor
+            && guestEmail
+            && guestEmail === String(currentBudget.userEmail || '').trim().toLowerCase()
+            && (!guestPhone || guestPhone === String(currentBudget.userPhone || '').trim());
+
+        if (!actor && !guestCanEdit) {
+            response.status(401).json({ ok: false, message: 'Sessao expirada. Entre novamente.' });
+            return;
+        }
+
+        if (actor && !actor.isAdmin && !budgetBelongsToUser(currentBudget, actor)) {
+            response.status(403).json({ ok: false, message: 'Voce nao pode alterar este orcamento.' });
+            return;
+        }
+
+        const incomingBudget = request.body?.budget || {};
+        const nextBudget = {
+            ...currentBudget,
+            ...incomingBudget,
+            id: currentBudget.id,
+            userId: currentBudget.userId,
+            userEmail: currentBudget.userEmail,
+            userPhone: currentBudget.userPhone,
+            updatedAt: new Date().toISOString()
+        };
+
+        appData.savedBudgets[budgetIndex] = nextBudget;
+        await writeAppData(appData);
+
+        response.json({
+            ok: true,
+            budget: nextBudget,
+            data: buildAppDataForRequest(appData, actor)
+        });
+    } catch (error) {
+        console.error('Erro ao atualizar orcamento:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel atualizar o orcamento.' });
+    }
+});
+
+app.delete('/api/budgets/:budgetId', async (request, response) => {
+    try {
+        const appData = await readAppData();
+        const actor = requireAuthenticatedUser(request, response, appData);
+        if (!actor) return;
+
+        const budgetId = Number(request.params.budgetId || 0);
+        const currentBudget = Array.isArray(appData.savedBudgets)
+            ? appData.savedBudgets.find(item => Number(item.id) === budgetId)
+            : null;
+        if (!currentBudget) {
+            response.status(404).json({ ok: false, message: 'Orcamento nao encontrado.' });
+            return;
+        }
+
+        if (!actor.isAdmin && !budgetBelongsToUser(currentBudget, actor)) {
+            response.status(403).json({ ok: false, message: 'Voce nao pode excluir este orcamento.' });
+            return;
+        }
+
+        appData.savedBudgets = appData.savedBudgets.filter(item => Number(item.id) !== budgetId);
+        await writeAppData(appData);
+
+        response.json({
+            ok: true,
+            data: buildAppDataForRequest(appData, actor)
+        });
+    } catch (error) {
+        console.error('Erro ao excluir orcamento:', error);
+        response.status(500).json({ ok: false, message: 'Nao foi possivel excluir o orcamento.' });
+    }
+});
+
 app.post('/api/product-image', async (request, response) => {
+    const appData = await readAppData().catch(() => null);
+    const user = appData ? requireAdminUser(request, response, appData) : null;
+    if (!user) return;
+
     const { dataUrl } = request.body || {};
 
     if (!dataUrl) {
@@ -572,6 +1206,8 @@ app.post('/api/admin-user-created-email', async (request, response) => {
 
     try {
         const appData = await readAppData();
+        const actor = requireAdminUser(request, response, appData);
+        if (!actor) return;
         const user = Array.isArray(appData.users) ? appData.users.find(item => String(item.email || '').toLowerCase() === email) : null;
 
         if (!user) {
@@ -634,7 +1270,7 @@ app.post('/api/password-reset/confirm', async (request, response) => {
             return;
         }
 
-        user.password = newPassword;
+        user.passwordHash = await hashPassword(newPassword);
         delete user.resetToken;
         delete user.resetTokenExpiresAt;
         await writeAppData(appData);
@@ -655,6 +1291,13 @@ app.post('/api/budget-email', async (request, response) => {
     }
 
     try {
+        const appData = await readAppData();
+        const actor = requireAuthenticatedUser(request, response, appData);
+        if (!actor) return;
+        if (!actor.isAdmin && String(actor.email || '').trim().toLowerCase() !== String(email).trim().toLowerCase()) {
+            response.status(403).json({ ok: false, message: 'Voce nao pode enviar este e-mail.' });
+            return;
+        }
         const message = buildBudgetCreatedEmail({ customerName, budgetId, total, eventName, deliveryDate, deliveryTime, address, items });
         await sendEmailMessage({
             from: process.env.EMAIL_FROM || process.env.RESEND_FROM || process.env.EMAIL_USER,
@@ -681,6 +1324,9 @@ app.post('/api/budget-status-email', async (request, response) => {
     }
 
     try {
+        const appData = await readAppData();
+        const actor = requireAdminUser(request, response, appData);
+        if (!actor) return;
         const message = buildBudgetStatusEmail({ customerName, budgetId, status, total, eventName, cancelReason, suggestedDate, suggestedTime, originalDate, originalTime });
         await sendEmailMessage({
             from: process.env.EMAIL_FROM || process.env.RESEND_FROM || process.env.EMAIL_USER,

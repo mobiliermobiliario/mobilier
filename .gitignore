@@ -5,4 +5,5 @@ backend/.env
 backend/node_modules/
 backend/server.err.log
 backend/server.out.log
+backend/data/app-data.json
 backend/data/uploads/

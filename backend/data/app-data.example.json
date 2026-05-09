@@ -1,0 +1,124 @@
+{
+  "updatedAt": "2026-05-09T15:07:41.998Z",
+  "products": [
+    {
+      "id": 1,
+      "name": "Cadeira de Madeira Maciça",
+      "description": "Cadeira rústica em madeira maciça, ideal para casamentos e eventos rurais.",
+      "price": 15,
+      "stock": 239,
+      "bulkDiscount": {
+        "quantity": 200,
+        "price": 14
+      },
+      "image": "fas fa-chair",
+      "category": "Cadeira"
+    },
+    {
+      "id": 2,
+      "name": "Mesa Redonda 1,5m",
+      "description": "Mesa redonda para 8 pessoas, estrutura em metal e tampo de MDF.",
+      "price": 120,
+      "stock": 30,
+      "bulkDiscount": {
+        "quantity": 10,
+        "price": 110
+      },
+      "image": "fas fa-table",
+      "category": "Mesas"
+    },
+    {
+      "id": 3,
+      "name": "Puff de Couro Sintético",
+      "description": "Puff moderno em couro sintético, disponível em várias cores.",
+      "price": 45,
+      "stock": 100,
+      "bulkDiscount": null,
+      "image": "fas fa-couch",
+      "category": "Poltrona"
+    },
+    {
+      "id": 4,
+      "name": "Biombo Decorativo",
+      "description": "Biombo em madeira com detalhes em tecido para divisórias.",
+      "price": 180,
+      "stock": 20,
+      "bulkDiscount": null,
+      "image": "fas fa-border-none",
+      "category": "Diversos"
+    },
+    {
+      "id": 5,
+      "name": "Cadeira Dobrável Plástico",
+      "description": "Cadeira dobrável em plástico resistente, fácil transporte e armazenamento.",
+      "price": 12,
+      "stock": 300,
+      "bulkDiscount": {
+        "quantity": 100,
+        "price": 10.5
+      },
+      "image": "fas fa-chair",
+      "category": "Cadeira"
+    },
+    {
+      "id": 6,
+      "name": "Mesa Retangular 2m",
+      "description": "Mesa retangular para banquetes e eventos corporativos.",
+      "price": 150,
+      "stock": 30,
+      "bulkDiscount": {
+        "quantity": 5,
+        "price": 140
+      },
+      "image": "fas fa-table",
+      "category": "Mesas"
+    },
+    {
+      "id": 7,
+      "name": "Sofá de Canto",
+      "description": "Sofá de canto em tecido resistente, ideal para área de descanso.",
+      "price": 350,
+      "stock": 8,
+      "bulkDiscount": null,
+      "image": "fas fa-couch",
+      "category": "Poltrona"
+    },
+    {
+      "id": 8,
+      "name": "Barril de Cerveja Decorativo",
+      "description": "Barril decorativo para servir drinks ou como elemento cenográfico.",
+      "price": 220,
+      "stock": 15,
+      "bulkDiscount": null,
+      "image": "fas fa-wine-bottle",
+      "category": "Diversos"
+    }
+  ],
+  "users": [
+    {
+      "id": 1,
+      "email": "mobiliermobiliario@gmail.com",
+      "name": "Administrador",
+      "isAdmin": true,
+      "createdAt": "2026-04-03T01:39:02.613Z",
+      "updatedAt": "2026-05-09T15:07:41.998Z",
+      "passwordHash": "$2b$10$yDgw06NBR8nCZJofR9abFuMD7e8xqqCxsj7BVHh/6M0c6E.eLnvmu"
+    }
+  ],
+  "savedBudgets": [],
+  "companyData": {
+    "name": "Mobilier - Mobiliário para Eventos",
+    "instagram": "@mobilier_mobiliario",
+    "phone": "42 - 999600315",
+    "email": "mobiliermobiliario@gmail.com",
+    "deliveryStates": [
+      "PR",
+      "SC"
+    ]
+  },
+  "stockMovements": [],
+  "financialEntries": [],
+  "accessHistory": [],
+  "leadContacts": [],
+  "logisticsEntries": []
+}
