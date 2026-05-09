@@ -961,9 +961,9 @@
                     <span class="close-product-modal" style="font-size: 28px; cursor: pointer; color: white;">&times;</span>
                 </div>
                 <div class="modal-body" style="padding: 24px;">
-                    <div style="display:grid; grid-template-columns: minmax(220px, 260px) minmax(0,1fr); gap:20px; align-items:start;">
+                    <div style="display:grid; grid-template-columns: minmax(280px, 360px) minmax(0,1fr); gap:24px; align-items:start;">
                         <div class="product-detail-gallery">
-                            <div class="product-image product-detail-main-image" style="height:220px; border-radius:18px;">
+                            <div class="product-image product-detail-main-image" style="height:320px; border-radius:22px;">
                                 ${primaryImage ? `<img src="${primaryImage}" alt="${product.name}" class="hero-product-image" id="productDetailMainImage">` : `<i class="${product.image || 'fas fa-box'}" id="productDetailMainIcon"></i>`}
                             </div>
                             ${gallery.length > 1 ? `
@@ -990,7 +990,7 @@
                     </div>
                     <div style="text-align:center; margin-top:24px;">
                         <button class="cta-button add-from-details" data-id="${product.id}" ${available === 0 ? 'disabled' : ''}>
-                            <i class="fas fa-cart-plus"></i> Adicionar ao orÃ§amento
+                            <i class="fas fa-cart-plus"></i> Adicionar ao pedido
                         </button>
                     </div>
                 </div>
