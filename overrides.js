@@ -63,6 +63,58 @@
         }));
     }
 
+    function normalizeProductImageCollections() {
+        if (!Array.isArray(products)) return;
+        products = products.map(product => {
+            const rawImages = Array.isArray(product?.imageUrls) ? product.imageUrls : [];
+            const normalizedImages = rawImages
+                .map(image => String(image || '').trim())
+                .filter(Boolean);
+            const singleImage = String(product?.imageUrl || '').trim();
+
+            if (singleImage && !normalizedImages.includes(singleImage)) {
+                normalizedImages.unshift(singleImage);
+            }
+
+            const uniqueImages = normalizedImages.filter((image, index, list) => list.indexOf(image) === index);
+
+            return {
+                ...product,
+                image: product?.image || 'fas fa-box',
+                imageUrls: uniqueImages,
+                imageUrl: uniqueImages[0] || ''
+            };
+        });
+    }
+
+    function getProductImageGallery(product) {
+        const images = Array.isArray(product?.imageUrls) ? product.imageUrls : [];
+        if (images.length) return images.filter(Boolean);
+        const singleImage = String(product?.imageUrl || '').trim();
+        return singleImage ? [singleImage] : [];
+    }
+
+    function getPrimaryProductImage(product) {
+        return getProductImageGallery(product)[0] || '';
+    }
+
+    function escapeAttribute(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function escapeInlineText(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    normalizeProductImageCollections();
+
     function getSelectedReservationDate() {
         return String(
             document.getElementById('deliveryDate')?.value
@@ -627,6 +679,7 @@
 
     function buildAppSnapshot() {
         if (typeof normalizeAppData === 'function') normalizeAppData();
+        normalizeProductImageCollections();
         return {
             updatedAt: new Date().toISOString(),
             products,
@@ -678,6 +731,7 @@
         leadContacts = Array.isArray(snapshot.leadContacts) ? snapshot.leadContacts : leadContacts;
         logisticsEntries = Array.isArray(snapshot.logisticsEntries) ? snapshot.logisticsEntries : logisticsEntries;
         normalizeProductCategories();
+        normalizeProductImageCollections();
         if (typeof normalizeAppData === 'function') normalizeAppData();
     }
 
@@ -819,6 +873,7 @@
         const productsGrid = document.getElementById('productsGrid');
         if (!productsGrid) return;
 
+        normalizeProductImageCollections();
         const canShowPrices = false;
         productsGrid.innerHTML = '';
 
@@ -834,11 +889,14 @@
                     : `${available} unidade(s) disponiveis${reserved ? ` â€¢ ${reserved} no carrinho` : ''}`;
 
             const maxSelectable = Math.max(1, available || 1);
+            const gallery = getProductImageGallery(product);
+            const primaryImage = gallery[0] || '';
             const productCard = document.createElement('div');
             productCard.className = 'product-card';
             productCard.innerHTML = `
                 <div class="product-image">
-                    ${product.imageUrl ? `<img src="${product.imageUrl}" alt="${product.name}" class="hero-product-image">` : `<i class="${product.image || 'fas fa-box'}"></i>`}
+                    ${primaryImage ? `<img src="${primaryImage}" alt="${product.name}" class="hero-product-image">` : `<i class="${product.image || 'fas fa-box'}"></i>`}
+                    ${gallery.length > 1 ? `<span class="product-gallery-badge">+${gallery.length - 1} foto${gallery.length - 1 > 1 ? 's' : ''}</span>` : ''}
                 </div>
                 <div class="product-info">
                     <h3 class="product-title">${product.name}</h3>
@@ -888,8 +946,11 @@
         const product = products.find(item => Number(item.id) === Number(productId));
         if (!product) return;
 
+        normalizeProductImageCollections();
         const available = getAvailableProductStock(productId);
         const canShowPrices = false;
+        const gallery = getProductImageGallery(product);
+        const primaryImage = gallery[0] || '';
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.style.display = 'block';
@@ -900,9 +961,20 @@
                     <span class="close-product-modal" style="font-size: 28px; cursor: pointer; color: white;">&times;</span>
                 </div>
                 <div class="modal-body" style="padding: 24px;">
-                    <div style="display:grid; grid-template-columns: 180px minmax(0,1fr); gap:20px; align-items:center;">
-                        <div class="product-image" style="height:180px; border-radius:18px;">
-                            ${product.imageUrl ? `<img src="${product.imageUrl}" alt="${product.name}" class="hero-product-image">` : `<i class="${product.image || 'fas fa-box'}"></i>`}
+                    <div style="display:grid; grid-template-columns: minmax(220px, 260px) minmax(0,1fr); gap:20px; align-items:start;">
+                        <div class="product-detail-gallery">
+                            <div class="product-image product-detail-main-image" style="height:220px; border-radius:18px;">
+                                ${primaryImage ? `<img src="${primaryImage}" alt="${product.name}" class="hero-product-image" id="productDetailMainImage">` : `<i class="${product.image || 'fas fa-box'}" id="productDetailMainIcon"></i>`}
+                            </div>
+                            ${gallery.length > 1 ? `
+                                <div class="product-detail-thumbs">
+                                    ${gallery.map((image, index) => `
+                                        <button type="button" class="product-detail-thumb ${index === 0 ? 'is-active' : ''}" data-image="${escapeAttribute(image)}" aria-label="Ver foto ${index + 1}">
+                                            <img src="${image}" alt="${product.name} - foto ${index + 1}">
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
                         </div>
                         <div>
                             <p><strong>Categoria:</strong> ${product.category || 'Diversos'}</p>
@@ -927,6 +999,17 @@
 
         document.body.appendChild(modal);
         modal.querySelector('.close-product-modal')?.addEventListener('click', () => modal.remove());
+        modal.querySelectorAll('.product-detail-thumb').forEach(button => {
+            button.addEventListener('click', function () {
+                const nextImage = this.getAttribute('data-image') || '';
+                const mainImage = modal.querySelector('#productDetailMainImage');
+                if (mainImage && nextImage) {
+                    mainImage.src = nextImage;
+                }
+                modal.querySelectorAll('.product-detail-thumb').forEach(item => item.classList.remove('is-active'));
+                this.classList.add('is-active');
+            });
+        });
         modal.querySelector('.add-from-details')?.addEventListener('click', function () {
             const quantity = Math.max(1, parseInt(document.getElementById(`detailQty${product.id}`)?.value || '1', 10));
             addToBudget(product.id, quantity);
@@ -3082,7 +3165,7 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                     return `
                         <div class="table-row" data-product-name="${String(product.name || '').replace(/"/g, '&quot;')}" data-product-category="${String(product.category || '').replace(/"/g, '&quot;')}" data-product-stock="${stock}">
                             <div data-label="ID">${product.id}</div>
-                            <div data-label="Midia">${product.imageUrl ? `<img src="${product.imageUrl}" alt="${product.name}" class="product-thumb">` : `<i class="${product.image} product-icon"></i>`}</div>
+                            <div data-label="Midia">${getPrimaryProductImage(product) ? `<img src="${getPrimaryProductImage(product)}" alt="${product.name}" class="product-thumb">` : `<i class="${product.image} product-icon"></i>`}</div>
                             <div data-label="Produto">${product.name}</div>
                                 <div data-label="Categoria">${product.category}</div>
                             <div data-label="Preco">${formatCurrencyBRL(product.price)}</div>
@@ -3106,6 +3189,7 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         const productIndex = products.findIndex(product => product.id === productId);
         if (productIndex === -1) return;
 
+        normalizeProductImageCollections();
         const previousProduct = products[productIndex];
         const previousStock = Number(previousProduct.stock || 0);
         const productName = document.getElementById('editProductName')?.value.trim() || '';
@@ -3115,7 +3199,15 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         const productPrice = parseFloat(document.getElementById('editProductPrice')?.value || '0');
         const productStock = parseInt(document.getElementById('editProductStock')?.value || '0', 10);
         const productIcon = document.getElementById('editProductIcon')?.value || previousProduct.image || 'fas fa-box';
-        let productImageUrl = document.getElementById('editProductImageUrl')?.value.trim() || '';
+        let productImageUrls = [];
+        try {
+            productImageUrls = JSON.parse(document.getElementById('editProductImagesData')?.value || '[]');
+        } catch (error) {
+            productImageUrls = [];
+        }
+        productImageUrls = Array.isArray(productImageUrls)
+            ? productImageUrls.map(image => String(image || '').trim()).filter(Boolean)
+            : [];
         const bulkQuantity = parseInt(document.getElementById('editBulkQuantity')?.value || '0', 10);
         const bulkPrice = parseFloat(document.getElementById('editBulkPrice')?.value || '0');
 
@@ -3136,12 +3228,17 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         }
 
         try {
-            if (productImageUrl.startsWith('data:image/')) {
-                const uploadResponse = await postJsonWithResponse('/api/product-image', { dataUrl: productImageUrl });
-                if (uploadResponse?.imageUrl) {
-                    productImageUrl = uploadResponse.imageUrl;
+            for (let index = 0; index < productImageUrls.length; index += 1) {
+                const currentImage = productImageUrls[index];
+                if (currentImage.startsWith('data:image/')) {
+                    const uploadResponse = await postJsonWithResponse('/api/product-image', { dataUrl: currentImage });
+                    if (uploadResponse?.imageUrl) {
+                        productImageUrls[index] = uploadResponse.imageUrl;
+                    }
                 }
             }
+
+            productImageUrls = productImageUrls.filter((image, index, list) => image && list.indexOf(image) === index);
 
             products[productIndex] = {
                 ...previousProduct,
@@ -3151,7 +3248,8 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                 price: productPrice,
                 stock: productStock,
                 image: productIcon,
-                imageUrl: productImageUrl,
+                imageUrls: productImageUrls,
+                imageUrl: productImageUrls[0] || '',
                 bulkDiscount
             };
 
@@ -3176,6 +3274,241 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         }
     };
 
+    window.editProduct = editProduct = function (productId) {
+        normalizeProductImageCollections();
+        const product = products.find(item => Number(item.id) === Number(productId));
+        if (!product) return;
+
+        document.getElementById('productEditModal')?.parentElement?.remove();
+
+        const iconOptions = [
+            'fas fa-chair', 'fas fa-table', 'fas fa-couch', 'fas fa-border-none',
+            'fas fa-wine-bottle', 'fas fa-bed', 'fas fa-tv', 'fas fa-umbrella-beach',
+            'fas fa-campground', 'fas fa-glass-cheers', 'fas fa-utensils', 'fas fa-lightbulb',
+            'fas fa-box', 'fas fa-pallet', 'fas fa-warehouse', 'fas fa-truck-loading',
+            'fas fa-chair-office', 'fas fa-desktop', 'fas fa-door-closed', 'fas fa-fan'
+        ];
+        const productImages = getProductImageGallery(product);
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <div class="modal" id="productEditModal" style="display:block; background: rgba(3,7,18,0.82);">
+                <div class="modal-content product-gallery-modal">
+                    <div class="modal-header">
+                        <div>
+                            <span class="stock-adjustment-kicker">Cadastro visual do produto</span>
+                            <h2>${product.id ? 'Editar produto' : 'Novo produto'}</h2>
+                        </div>
+                        <span class="close-modal">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <form id="editProductForm" class="edit-product-form">
+                            <input type="hidden" id="editProductImagesData" value="${escapeAttribute(JSON.stringify(productImages))}">
+                            <div class="product-editor-layout">
+                                <div class="product-editor-main">
+                                    <div class="form-row-2">
+                                        <div class="settings-form-group">
+                                            <label for="editProductName">Nome do produto *</label>
+                                            <input type="text" id="editProductName" value="${escapeAttribute(product.name)}" required>
+                                        </div>
+                                        <div class="settings-form-group">
+                                            <label for="editProductCategory">Categoria *</label>
+                                            <select id="editProductCategory" required>
+                                                ${PRODUCT_CATEGORIES.map(category => `<option value="${category}" ${normalizeCategoryValue(product.category) === category ? 'selected' : ''}>${category}</option>`).join('')}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="settings-form-group">
+                                        <label for="editProductDescription">Descricao *</label>
+                                        <textarea id="editProductDescription" rows="4" required>${escapeInlineText(product.description || '')}</textarea>
+                                    </div>
+                                    <div class="form-row-3">
+                                        <div class="settings-form-group">
+                                            <label for="editProductPrice">Preco (R$) *</label>
+                                            <input type="number" id="editProductPrice" step="0.01" min="0" value="${Number(product.price || 0)}" required>
+                                        </div>
+                                        <div class="settings-form-group">
+                                            <label for="editProductStock">Estoque *</label>
+                                            <input type="number" id="editProductStock" min="0" value="${Number(product.stock || 0)}" required>
+                                        </div>
+                                        <div class="settings-form-group">
+                                            <label for="editProductIcon">Icone de apoio</label>
+                                            <div class="icon-selector">
+                                                <select id="editProductIcon">
+                                                    ${iconOptions.map(icon => `<option value="${icon}" ${icon === (product.image || 'fas fa-box') ? 'selected' : ''}>${icon.replace('fas fa-', '').replace(/-/g, ' ')}</option>`).join('')}
+                                                </select>
+                                                <div id="iconPreview"><i class="${product.image || 'fas fa-box'}"></i></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="discount-section">
+                                        <div class="discount-header">
+                                            <label>Desconto por quantidade</label>
+                                            <button type="button" id="toggleDiscount">
+                                                ${product.bulkDiscount ? 'Remover desconto' : 'Adicionar desconto'}
+                                            </button>
+                                        </div>
+                                        <div id="discountFields" class="${product.bulkDiscount ? 'show' : ''}">
+                                            <div class="form-row-2">
+                                                <div class="settings-form-group">
+                                                    <label for="editBulkQuantity">Quantidade minima</label>
+                                                    <input type="number" id="editBulkQuantity" min="2" value="${product.bulkDiscount?.quantity || ''}" placeholder="Ex: 100">
+                                                </div>
+                                                <div class="settings-form-group">
+                                                    <label for="editBulkPrice">Preco com desconto</label>
+                                                    <input type="number" id="editBulkPrice" step="0.01" min="0" value="${product.bulkDiscount?.price || ''}" placeholder="Ex: 10.50">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <aside class="product-editor-media">
+                                    <div class="product-editor-media-card">
+                                        <div class="product-editor-media-head">
+                                            <h3>Galeria de imagens</h3>
+                                            <span>Adicione varias fotos para o cliente visualizar melhor.</span>
+                                        </div>
+                                        <div id="productImagePreview" class="product-gallery-preview-grid"></div>
+                                        <div class="settings-form-group">
+                                            <label for="editProductImageFiles">Enviar fotos</label>
+                                            <input type="file" id="editProductImageFiles" accept="image/*" multiple>
+                                        </div>
+                                        <div class="settings-form-group">
+                                            <label for="editProductImageUrl">Ou cole o link de uma imagem</label>
+                                            <div class="product-gallery-url-row">
+                                                <input type="url" id="editProductImageUrl" placeholder="https://...">
+                                                <button type="button" id="addProductImageUrl" class="btn-outline">Adicionar</button>
+                                            </div>
+                                        </div>
+                                        <p class="product-gallery-helper">A primeira imagem da lista vira a capa do produto na vitrine.</p>
+                                    </div>
+                                </aside>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit"><i class="fas fa-save"></i> Salvar produto</button>
+                                <button type="button" class="cancel-btn">Fechar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(wrapper);
+
+        const modalElement = wrapper.querySelector('#productEditModal');
+        const form = wrapper.querySelector('#editProductForm');
+        const hiddenImagesField = wrapper.querySelector('#editProductImagesData');
+        const preview = wrapper.querySelector('#productImagePreview');
+        const fileInput = wrapper.querySelector('#editProductImageFiles');
+        const imageUrlInput = wrapper.querySelector('#editProductImageUrl');
+        const addUrlButton = wrapper.querySelector('#addProductImageUrl');
+        const iconSelect = wrapper.querySelector('#editProductIcon');
+        const iconPreview = wrapper.querySelector('#iconPreview');
+        const toggleDiscountBtn = wrapper.querySelector('#toggleDiscount');
+        const discountFields = wrapper.querySelector('#discountFields');
+
+        const readImages = () => {
+            try {
+                const parsed = JSON.parse(hiddenImagesField?.value || '[]');
+                return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+            } catch (error) {
+                return [];
+            }
+        };
+
+        const writeImages = (images) => {
+            hiddenImagesField.value = JSON.stringify(images.filter(Boolean));
+        };
+
+        const renderGalleryPreview = () => {
+            const images = readImages();
+            preview.innerHTML = images.length
+                ? images.map((image, index) => `
+                    <div class="product-gallery-preview-item ${index === 0 ? 'is-cover' : ''}">
+                        <img src="${image}" alt="${escapeAttribute(product.name)} - imagem ${index + 1}" class="image-upload-preview">
+                        <div class="product-gallery-preview-meta">
+                            <span>${index === 0 ? 'Capa principal' : `Foto ${index + 1}`}</span>
+                            <button type="button" class="product-gallery-remove" data-index="${index}"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                `).join('')
+                : `<div class="product-gallery-empty">
+                        <div class="image-upload-preview" style="display:grid;place-items:center;color:white;">
+                            <i class="${iconSelect.value || 'fas fa-box'}" style="font-size:42px;"></i>
+                        </div>
+                        <p>Nenhuma imagem adicionada ainda.</p>
+                   </div>`;
+
+            preview.querySelectorAll('.product-gallery-remove').forEach(button => {
+                button.addEventListener('click', function () {
+                    const images = readImages();
+                    images.splice(Number(this.dataset.index || 0), 1);
+                    writeImages(images);
+                    renderGalleryPreview();
+                });
+            });
+        };
+
+        iconSelect?.addEventListener('change', function () {
+            iconPreview.innerHTML = `<i class="${this.value}"></i>`;
+            if (!readImages().length) renderGalleryPreview();
+        });
+
+        toggleDiscountBtn?.addEventListener('click', function () {
+            if (discountFields.classList.contains('show')) {
+                discountFields.classList.remove('show');
+                this.textContent = 'Adicionar desconto';
+                wrapper.querySelector('#editBulkQuantity').value = '';
+                wrapper.querySelector('#editBulkPrice').value = '';
+            } else {
+                discountFields.classList.add('show');
+                this.textContent = 'Remover desconto';
+            }
+        });
+
+        fileInput?.addEventListener('change', function () {
+            const files = Array.from(this.files || []);
+            if (!files.length) return;
+            Promise.all(files.map(file => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = event => resolve(String(event.target?.result || ''));
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            }))).then(results => {
+                const nextImages = [...readImages(), ...results.filter(Boolean)];
+                writeImages(nextImages);
+                renderGalleryPreview();
+                this.value = '';
+            }).catch(() => {
+                showAdminMessage('Nao foi possivel carregar uma das imagens selecionadas.', 'error');
+            });
+        });
+
+        addUrlButton?.addEventListener('click', function () {
+            const value = String(imageUrlInput?.value || '').trim();
+            if (!value) return;
+            const nextImages = [...readImages(), value];
+            writeImages(nextImages);
+            imageUrlInput.value = '';
+            renderGalleryPreview();
+        });
+
+        form?.addEventListener('submit', function (event) {
+            event.preventDefault();
+            saveProductChanges(productId);
+        });
+
+        wrapper.querySelectorAll('.close-modal, .cancel-btn').forEach(button => {
+            button.addEventListener('click', () => wrapper.remove());
+        });
+
+        modalElement?.addEventListener('click', function (event) {
+            if (event.target === modalElement) wrapper.remove();
+        });
+
+        renderGalleryPreview();
+    };
+
     window.addNewProduct = addNewProduct = function () {
         const nextId = products.length ? Math.max(...products.map(product => Number(product.id || 0))) + 1 : 1;
         products.push({
@@ -3186,6 +3519,7 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
             stock: 0,
             bulkDiscount: null,
             image: 'fas fa-box',
+            imageUrls: [],
             imageUrl: '',
             category: 'Diversos'
         });
@@ -3239,7 +3573,7 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                     <div class="modal-body">
                         <div class="stock-adjustment-product-card">
                             <div class="stock-adjustment-product-visual">
-                                ${product.imageUrl ? `<img src="${product.imageUrl}" alt="${product.name}">` : `<i class="${product.image || 'fas fa-box'}"></i>`}
+                                ${getPrimaryProductImage(product) ? `<img src="${getPrimaryProductImage(product)}" alt="${product.name}">` : `<i class="${product.image || 'fas fa-box'}"></i>`}
                             </div>
                             <div class="stock-adjustment-product-copy">
                                 <h3>${product.name}</h3>
@@ -4613,16 +4947,17 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         if (!track || !dotsContainer || !prevButton || !nextButton) return;
         if (track.dataset.initializedCarousel === 'true') return;
 
+        normalizeProductImageCollections();
         const availableProducts = (Array.isArray(products) ? products : [])
-            .filter(product => product && (product.imageUrl || product.image))
+            .filter(product => product && (getPrimaryProductImage(product) || product.image))
             .slice(0, 6);
 
         if (!availableProducts.length) return;
 
         track.innerHTML = availableProducts.map((product, index) => `
             <div class="about-carousel-slide ${index === 0 ? 'is-active' : ''}" data-slide-index="${index}">
-                ${product.imageUrl
-                    ? `<img src="${product.imageUrl}" alt="${product.name}" class="about-carousel-image">`
+                ${getPrimaryProductImage(product)
+                    ? `<img src="${getPrimaryProductImage(product)}" alt="${product.name}" class="about-carousel-image">`
                     : `<div class="about-carousel-image" style="display:grid;place-items:center;color:#f6d774;font-size:6rem;"><i class="${product.image || 'fas fa-couch'}"></i></div>`}
                 <div class="about-carousel-caption">
                     <strong>${product.name || 'Mobilier'}</strong>
