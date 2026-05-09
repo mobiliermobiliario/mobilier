@@ -7506,6 +7506,16 @@ textarea:focus {
     margin-bottom: 18px;
 }
 
+#productEditModal #iconPreview {
+    min-width: 58px;
+    height: 52px;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    color: #f8fafc;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
 #productEditModal .product-gallery-preview-grid {
     display: grid;
     gap: 14px;
@@ -7553,6 +7563,65 @@ textarea:focus {
     gap: 10px;
 }
 
+#productEditModal #addProductImageUrl {
+    min-width: 132px;
+    min-height: 50px;
+    border-radius: 14px;
+    border: 1px solid rgba(242, 207, 89, 0.34);
+    background: rgba(242, 207, 89, 0.12);
+    color: #ffe59a;
+    font-weight: 700;
+}
+
+#productEditModal #addProductImageUrl:hover {
+    background: rgba(242, 207, 89, 0.18);
+    border-color: rgba(242, 207, 89, 0.5);
+}
+
+#productEditModal .product-gallery-file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+#productEditModal .product-gallery-upload-bar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+}
+
+#productEditModal .product-upload-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 46px;
+    padding: 0 18px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f2cf59 0%, #d7a91f 100%);
+    color: #14263f;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 12px 24px rgba(215, 169, 31, 0.22);
+}
+
+#productEditModal .product-upload-trigger:hover {
+    transform: translateY(-1px);
+}
+
+#productEditModal .product-upload-filename {
+    color: rgba(255,255,255,0.72);
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
+
 #productEditModal .product-gallery-helper {
     color: rgba(255,255,255,0.62);
     font-size: 0.9rem;
@@ -7562,6 +7631,29 @@ textarea:focus {
 #productEditModal .product-gallery-empty {
     display: grid;
     gap: 10px;
+    padding: 22px 18px;
+    text-align: center;
+    border-radius: 20px;
+    border: 1px dashed rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.03);
+}
+
+#productEditModal .product-gallery-empty-visual {
+    width: 88px;
+    height: 88px;
+    margin: 0 auto;
+    border-radius: 26px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, rgba(242, 207, 89, 0.24), rgba(215, 169, 31, 0.12));
+    border: 1px solid rgba(242, 207, 89, 0.24);
+    color: #f7d464;
+    font-size: 2rem;
+}
+
+#productEditModal .product-gallery-empty strong {
+    color: #fff;
+    font-size: 1rem;
 }
 
 #productEditModal .product-gallery-empty p {
@@ -7573,6 +7665,14 @@ textarea:focus {
 @media (max-width: 900px) {
     #productEditModal .product-editor-layout {
         grid-template-columns: 1fr;
+    }
+
+    #productEditModal .product-gallery-upload-bar {
+        grid-template-columns: 1fr;
+    }
+
+    #productEditModal .product-upload-trigger {
+        justify-content: center;
     }
 }
 

@@ -3370,7 +3370,14 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                                         <div id="productImagePreview" class="product-gallery-preview-grid"></div>
                                         <div class="settings-form-group">
                                             <label for="editProductImageFiles">Enviar fotos</label>
-                                            <input type="file" id="editProductImageFiles" accept="image/*" multiple>
+                                            <input type="file" id="editProductImageFiles" class="product-gallery-file-input" accept="image/*" multiple>
+                                            <div class="product-gallery-upload-bar">
+                                                <label for="editProductImageFiles" class="product-upload-trigger">
+                                                    <i class="fas fa-cloud-arrow-up"></i>
+                                                    <span>Escolher fotos</span>
+                                                </label>
+                                                <span class="product-upload-filename" id="productImageFilesLabel">Nenhum arquivo selecionado</span>
+                                            </div>
                                         </div>
                                         <div class="settings-form-group">
                                             <label for="editProductImageUrl">Ou cole o link de uma imagem</label>
@@ -3400,6 +3407,7 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
         const hiddenImagesField = wrapper.querySelector('#editProductImagesData');
         const preview = wrapper.querySelector('#productImagePreview');
         const fileInput = wrapper.querySelector('#editProductImageFiles');
+        const fileInputLabel = wrapper.querySelector('#productImageFilesLabel');
         const imageUrlInput = wrapper.querySelector('#editProductImageUrl');
         const addUrlButton = wrapper.querySelector('#addProductImageUrl');
         const iconSelect = wrapper.querySelector('#editProductIcon');
@@ -3433,10 +3441,11 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                     </div>
                 `).join('')
                 : `<div class="product-gallery-empty">
-                        <div class="image-upload-preview" style="display:grid;place-items:center;color:white;">
-                            <i class="${iconSelect.value || 'fas fa-box'}" style="font-size:42px;"></i>
+                        <div class="product-gallery-empty-visual">
+                            <i class="fas fa-images"></i>
                         </div>
-                        <p>Nenhuma imagem adicionada ainda.</p>
+                        <strong>Galeria pronta para receber fotos</strong>
+                        <p>Adicione imagens do produto para o cliente visualizar todos os detalhes.</p>
                    </div>`;
 
             preview.querySelectorAll('.product-gallery-remove').forEach(button => {
@@ -3468,6 +3477,11 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
 
         fileInput?.addEventListener('change', function () {
             const files = Array.from(this.files || []);
+            if (fileInputLabel) {
+                fileInputLabel.textContent = files.length
+                    ? `${files.length} arquivo${files.length > 1 ? 's' : ''} selecionado${files.length > 1 ? 's' : ''}`
+                    : 'Nenhum arquivo selecionado';
+            }
             if (!files.length) return;
             Promise.all(files.map(file => new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -3479,6 +3493,7 @@ Paragrafo unico. O CONTRATANTE, para garantir o fiel pagamento da multa, reserva
                 writeImages(nextImages);
                 renderGalleryPreview();
                 this.value = '';
+                if (fileInputLabel) fileInputLabel.textContent = 'Nenhum arquivo selecionado';
             }).catch(() => {
                 showAdminMessage('Nao foi possivel carregar uma das imagens selecionadas.', 'error');
             });
